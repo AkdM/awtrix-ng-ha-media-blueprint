@@ -1,0 +1,122 @@
+blueprint:
+  name: Media now playing on AWTRIX NG
+  description: >-
+    Shows what a media player is playing as an AWTRIX NG notification (over
+    MQTT) every time playback starts or is paused. Works with any
+    media_player entity: Plex, Spotify, Sonos, Apple TV, Google Cast...
+
+    TV episodes are shown as "Series S01E02 - Title", music as
+    "Artist - Title", anything else as its title, falling back to the
+    channel, app or player name when there is no title.
+
+    Animated play / pause icons are embedded, so nothing has to be uploaded
+    to the AWTRIX NG device.
+  source_url: https://github.com/AkdM/awtrix-ng-ha-media-blueprint/blob/main/media_awtrix_ng_blueprint.yaml
+  domain: automation
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    media_player:
+      name: Media players
+      description: One or more media players to watch.
+      selector:
+        entity:
+          filter:
+            - domain: media_player
+          multiple: true
+    mqtt_topic:
+      name: AWTRIX NG notify topic
+      description: >-
+        MQTT topic of the AWTRIX NG notify command, e.g.
+        `awtrix-ng/cmd/notify`.
+      selector:
+        text:
+    play_icon:
+      name: Play icon (optional)
+      description: >-
+        Icon shown while playing. Leave empty to use the embedded animated
+        play icon, or enter the name of an icon stored on your AWTRIX NG.
+      default: ""
+      selector:
+        text:
+    pause_icon:
+      name: Pause icon (optional)
+      description: >-
+        Icon shown when paused. Leave empty to use the embedded animated
+        pause icon, or enter the name of an icon stored on your AWTRIX NG.
+      default: ""
+      selector:
+        text:
+    wakeup:
+      name: Wake up display
+      description: Turn the matrix on to show the notification if it is off.
+      default: true
+      selector:
+        boolean:
+    repeat:
+      name: Repeat
+      description: How many times the text scrolls before the notification ends.
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 10
+          mode: box
+
+triggers:
+  - trigger: state
+    entity_id: !input media_player
+    to:
+      - playing
+      - paused
+
+conditions: []
+
+variables:
+  play_icon: !input play_icon
+  pause_icon: !input pause_icon
+  wakeup: !input wakeup
+  repeat_count: !input repeat
+  # Embedded 8x8 animated GIFs, base64. AWTRIX NG decodes any icon string
+  # longer than 64 characters as inline image data instead of looking up a file.
+  builtin_play_icon: "R0lGODlhCAAIAPIAAAAAAADSUCbZanPmn9n45QAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQEWgAAACwAAAAACAAIAAADDni6G9zBsUghlVeeOt9JACH5BAQGAAAALAAAAAAIAAgAAAMPeLpL3CE8EiOs8tB65zsJACH5BAQGAAAALAAAAAAIAAgAAAMReLo73CS8EYNU1Fpc78nTcyQAIfkEBAYAAAAsAAAAAAgACAAAAxJ4uivcgzwRQ4DE3kPz5tH0HAkAIfkEBAYAAAAsAAAAAAgACAAAAxF4uhvcYrwQiVN02JstlMzFJAAh+QQEBgAAACwAAAAACAAIAAADEni6G9xBvBAHgcK6Q/NV3fQcCQAh+QQEBgAAACwAAAAACAAIAAADEXi6G9zBsRjEgHUQRS1+EpMAACH5BAQGAAAALAAAAAAIAAgAAAMReLob3MGxGAWsQ9FgdXwSkwAAIfkEBAYAAAAsAAAAAAgACAAAAw54uhvcwbFIIRWKRvskSwA7"
+  builtin_pause_icon: "R0lGODlhCAAIAPIAAAAAAEwzAGtHAJlmAMyIAP+qAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQERgAAACwAAAAACAAIAAADDni6W6UOvhPprPhqyS1PACH5BAQJAAAALAAAAAAIAAgAAAMOeLpLpA6+E+ms+GrJLU8AIfkEBAkAAAAsAAAAAAgACAAAAw54ujujDr4T6az4asktTwAh+QQECQAAACwAAAAACAAIAAADDni6K6IOvhPprPhqyS1PACH5BAQQAAAALAAAAAAIAAgAAAMOeLoboQ6+E+ms+GrJLU8AIfkEBAkAAAAsAAAAAAgACAAAAw54uiuiDr4T6az4asktTwAh+QQECQAAACwAAAAACAAIAAADDni6O6MOvhPprPhqyS1PACH5BAQJAAAALAAAAAAIAAgAAAMOeLpLpA6+E+ms+GrJLU8AOw=="
+
+actions:
+  - variables:
+      icon_id: >-
+        {%- if trigger.to_state.state == 'playing' -%}
+          {{ play_icon or builtin_play_icon }}
+        {%- else -%}
+          {{ pause_icon or builtin_pause_icon }}
+        {%- endif -%}
+      media: >-
+        {%- set a = trigger.to_state.attributes -%}
+        {%- set title = a.get('media_title') -%}
+        {%- set series = a.get('media_series_title') -%}
+        {%- set artist = a.get('media_artist') -%}
+        {%- if series -%}
+          {%- set s = a.get('media_season') | int(0) -%}
+          {%- set e = a.get('media_episode') | int(0) -%}
+          {{ series }}{{ (' S%02dE%02d' | format(s, e)) if s and e else '' }}{{ (' - ' ~ title) if title else '' }}
+        {%- elif artist and title -%}
+          {{ artist }} - {{ title }}
+        {%- else -%}
+          {{ title or artist or a.get('media_channel') or a.get('app_name') or a.get('friendly_name') }}
+        {%- endif -%}
+  - action: mqtt.publish
+    data:
+      topic: !input mqtt_topic
+      payload: |-
+        {{
+          {
+            "text": media | string,
+            "icon": icon_id | string,
+            "wakeup": wakeup | bool,
+            "textCase": "asTyped",
+            "stack": false,
+            "repeat": repeat_count | int
+          } | to_json
+        }}
+
+mode: queued
