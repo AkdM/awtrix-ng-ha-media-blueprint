@@ -78,3 +78,7 @@ Each time a watched player changes to `playing` or `paused`, the blueprint
 publishes an AWTRIX NG notification to the topic you chose. The icon travels
 inside the payload as a base64 GIF: AWTRIX NG reads any `icon` value longer
 than 64 characters as inline image data instead of a file name.
+
+## License
+
+[MIT](LICENSE)
